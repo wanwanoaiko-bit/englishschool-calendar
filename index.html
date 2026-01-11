@@ -1,137 +1,132 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>英語教室 予約カレンダー（生徒用）</title>
-  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+<meta charset="UTF-8">
+<title>英語教室 予約カレンダー</title>
 
-  <style>
-    body { font-family: sans-serif; margin: 20px; }
-    #calendar { max-width: 900px; margin: auto; }
+<link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
 
-    /* モーダルのデザイン */
-    .modal-bg {
-      display: none;
-      position: fixed;
-      top:0; left:0; width:100%; height:100%;
-      background: rgba(0,0,0,0.5);
-      justify-content: center;
-      align-items: center;
-      z-index: 1000;
-    }
-    .modal {
-      background: #fff;
-      padding: 20px;
-      border-radius: 8px;
-      width: 300px;
-    }
-    .modal input, .modal textarea {
-      width: 100%;
-      margin-bottom: 10px;
-      padding: 5px;
-      box-sizing: border-box;
-    }
-    .modal button {
-      margin-top: 10px;
-      padding: 5px 10px;
-    }
-  </style>
+<style>
+body { font-family:sans-serif; margin:20px; }
+#calendar { max-width:900px; margin:auto; }
+#daySlots { max-width:900px; margin:20px auto; }
+
+.slot {
+  padding:10px;
+  margin:5px 0;
+  border-radius:6px;
+  cursor:pointer;
+}
+.free { background:#e6ffe6; }
+.full { background:#ffe6e6; color:#888; }
+</style>
 </head>
-<body>
-  <h1>英語教室 予約カレンダー（生徒用）</h1>
-  <div id="calendar"></div>
 
-  <!-- モーダルフォーム -->
-  <div class="modal-bg" id="modalBg">
-    <div class="modal">
-      <h3>予約情報を入力してください</h3>
-      <input type="text" id="studentName" placeholder="お名前">
-      <input type="email" id="studentEmail" placeholder="メールアドレス">
-      <textarea id="studentMemo" placeholder="質問・ご要望（空欄OK）"></textarea>
-      <button id="submitBtn">予約する</button>
-      <button id="cancelBtn">キャンセル</button>
-    </div>
-  </div>
+<body>
+
+<h2>英語教室 予約</h2>
+
+<div id="calendar"></div>
+<div id="daySlots"></div>
 
 <script>
-const IS_STUDENT_VIEW = true;
-let selectedEvent = null;
+const GAS_URL = "https://script.google.com/macros/s/AKfycbxSPt3DoIQtPe1-8NfQ5vbc6_FMMLrd3CxAcqYZ4ZLyHpX5E68LuTtG7J93R_RWxq2l/exec";
 
-document.addEventListener("DOMContentLoaded", function () {
-  const calendarEl = document.getElementById("calendar");
+let calendar;
 
-  const calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: "dayGridMonth",
-    slotMinTime: "08:00:00",
-    slotMaxTime: "22:00:00",
-    allDaySlot: false,
-    eventTimeFormat: { hour: "2-digit", minute: "2-digit", hour12: false },
+document.addEventListener("DOMContentLoaded", () => {
 
-    // ←ここにGASのURLを必ず閉じて入力
-    events: "https://script.google.com/macros/s/AKfycbxSPt3DoIQtPe1-8NfQ5vbc6_FMMLrd3CxAcqYZ4ZLyHpX5E68LuTtG7J93R_RWxq2l/exec",
+  fetch(GAS_URL)
+    .then(r => r.json())
+    .then(events => {
 
-    eventDidMount: function(info) {
-      if (IS_STUDENT_VIEW) {
-        if (info.event.title === "空き") {
-          info.event.setProp("title", "○");
-        } else {
-          info.event.setProp("title", "×");
+      // 空きがある日付だけを抽出
+      const freeDates = new Set();
+      events.forEach(e => {
+        if (e.title === "空き") {
+          freeDates.add(e.start.substr(0,10));
         }
-      }
-    },
+      });
 
-    eventClick: function(info) {
-      if (IS_STUDENT_VIEW && info.event.title !== "○") {
-        alert("この枠はすでに予約されています");
-        return;
+      // 背景イベント（青い日付）に変換
+      const bgEvents = [...freeDates].map(d => ({
+        start: d,
+        end: d,
+        display: "background",
+        backgroundColor: "#cce5ff"
+      }));
+
+      calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+        initialView: "dayGridMonth",
+        locale: "ja",
+        events: bgEvents,
+        dateClick(info){
+          loadDay(info.dateStr);
+        }
+      });
+
+      calendar.render();
+    });
+
+});
+
+// 指定日の時間枠を取得
+function loadDay(date){
+  fetch(GAS_URL)
+    .then(r=>r.json())
+    .then(events=>{
+      const dayEvents = events.filter(e => e.start.startsWith(date));
+
+      let html = `<h3>${date} の予約可能時間</h3>`;
+
+      if(dayEvents.length===0){
+        html += "この日は予約枠がありません";
       }
-      selectedEvent = info.event;
-      document.getElementById("modalBg").style.display = "flex";
+
+      dayEvents.forEach(e=>{
+        const start = e.start.substr(11,5);
+        const end   = e.end.substr(11,5);
+
+        if(e.title==="空き"){
+          html += `<div class="slot free" onclick="reserve('${e.start}','${e.end}')">
+                    ${start} - ${end}
+                  </div>`;
+        } else {
+          html += `<div class="slot full">
+                    ${start} - ${end}（予約済）
+                  </div>`;
+        }
+      });
+
+      document.getElementById("daySlots").innerHTML = html;
+    });
+}
+
+// 予約
+function reserve(start,end){
+  const name = prompt("お名前を入力してください");
+  const email = prompt("メールアドレスを入力してください");
+
+  if(!name || !email) return;
+
+  fetch(GAS_URL,{
+    method:"POST",
+    body:JSON.stringify({ start,end,name,email })
+  })
+  .then(r=>r.text())
+  .then(r=>{
+    if(r==="OK"){
+      alert("予約完了しました");
+      loadDay(start.substr(0,10));
+      location.reload(); // ← 青い日付を更新
+    } else {
+      alert("すでに予約されています");
     }
   });
-
-  calendar.render();
-
-  // モーダルボタン
-  document.getElementById("cancelBtn").onclick = function() {
-    document.getElementById("modalBg").style.display = "none";
-    selectedEvent = null;
-  };
-
-  document.getElementById("submitBtn").onclick = function() {
-    const name = document.getElementById("studentName").value.trim();
-    const email = document.getElementById("studentEmail").value.trim();
-    const memo = document.getElementById("studentMemo").value.trim();
-
-    if (!name || !email) { alert("名前とメールは必須です"); return; }
-
-    fetch("https://script.google.com/macros/s/AKfycbxSPt3DoIQtPe1-8NfQ5vbc6_FMMLrd3CxAcqYZ4ZLyHpX5E68LuTtG7J93R_RWxq2l/exec", {
-  method: "POST",
-  body: JSON.stringify({
-    date: selectedEvent.startStr.split("T")[0],
-    start: new Date(selectedEvent.start).toISOString(), // UTCに統一
-    end: new Date(selectedEvent.end).toISOString(),
-    name: name,
-    email: email,
-    memo: memo
-  })
-})
-    .then(res => res.text())
-    .then(res => {
-      if (res === "OK") {
-        selectedEvent.setProp("title", "×");
-        document.getElementById("modalBg").style.display = "none";
-        document.getElementById("studentName").value = "";
-        document.getElementById("studentEmail").value = "";
-        document.getElementById("studentMemo").value = "";
-        alert("予約が完了しました！");
-      } else {
-        alert("すでに予約済みです");
-      }
-    });
-  };
-});
+}
 </script>
+
+
 </body>
 </html>

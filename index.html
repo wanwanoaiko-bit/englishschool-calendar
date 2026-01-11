@@ -14,12 +14,33 @@ body { font-family:sans-serif; margin:20px; }
 
 .slot {
   padding:10px;
-  margin:5px 0;
+  margin:6px 0;
   border-radius:6px;
   cursor:pointer;
 }
 .free { background:#e6ffe6; }
 .full { background:#ffe6e6; color:#888; }
+
+/* モーダル */
+#modalBg{
+  display:none;
+  position:fixed;
+  top:0; left:0; width:100%; height:100%;
+  background:rgba(0,0,0,.5);
+  justify-content:center;
+  align-items:center;
+  z-index:1000;
+}
+#modal{
+  background:#fff;
+  padding:20px;
+  border-radius:8px;
+  width:300px;
+}
+#modal input,#modal textarea{
+  width:100%;
+  margin-bottom:8px;
+}
 </style>
 </head>
 
@@ -30,18 +51,31 @@ body { font-family:sans-serif; margin:20px; }
 <div id="calendar"></div>
 <div id="daySlots"></div>
 
+<!-- 予約モーダル -->
+<div id="modalBg">
+  <div id="modal">
+    <h3>予約情報</h3>
+    <input id="studentName" placeholder="お名前">
+    <input id="studentEmail" placeholder="メールアドレス">
+    <textarea id="studentMemo" placeholder="ご要望・質問（任意）"></textarea>
+    <button onclick="submitReservation()">予約する</button>
+    <button onclick="closeModal()">キャンセル</button>
+  </div>
+</div>
+
 <script>
 const GAS_URL = "https://script.google.com/macros/s/AKfycbxSPt3DoIQtPe1-8NfQ5vbc6_FMMLrd3CxAcqYZ4ZLyHpX5E68LuTtG7J93R_RWxq2l/exec";
 
-let calendar;
+let allEvents = [];
+let selectedSlot = null;
 
 document.addEventListener("DOMContentLoaded", () => {
-
   fetch(GAS_URL)
     .then(r => r.json())
     .then(events => {
+      allEvents = events;
 
-      // 空きがある日付だけを抽出
+      // 空きがある日だけ取得
       const freeDates = new Set();
       events.forEach(e => {
         if (e.title === "空き") {
@@ -49,84 +83,122 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       });
 
-      // 背景イベント（青い日付）に変換
-      const bgEvents = [...freeDates].map(d => ({
-        start: d,
-        end: d,
-        display: "background",
-        backgroundColor: "#cce5ff"
-      }));
+      // 今日以降だけを青く塗る
+      const today = new Date();
+      today.setHours(0,0,0,0);
 
-      calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
+      const bgEvents = [...freeDates]
+        .filter(d => new Date(d) >= today)
+        .map(d => ({
+          start: d,
+          end: d,
+          display: "background",
+          backgroundColor: "#cce5ff"
+        }));
+
+      const calendar = new FullCalendar.Calendar(document.getElementById("calendar"), {
         initialView: "dayGridMonth",
         locale: "ja",
         events: bgEvents,
-        dateClick(info){
+
+        dateClick(info) {
+          const clicked = new Date(info.dateStr + "T00:00:00");
+
+          if (clicked < today) {
+            alert("過去の日付は予約できません");
+            return;
+          }
+
           loadDay(info.dateStr);
         }
       });
 
       calendar.render();
     });
-
 });
 
-// 指定日の時間枠を取得
 function loadDay(date){
-  fetch(GAS_URL)
-    .then(r=>r.json())
-    .then(events=>{
-      const dayEvents = events.filter(e => e.start.startsWith(date));
+  const now = new Date();
 
-      let html = `<h3>${date} の予約可能時間</h3>`;
+  const dayEvents = allEvents.filter(e => {
+    if(!e.start.startsWith(date)) return false;
+    return new Date(e.start) > now;
+  });
 
-      if(dayEvents.length===0){
-        html += "この日は予約枠がありません";
-      }
+  let html = `<h3>${date} の予約可能時間</h3>`;
 
-      dayEvents.forEach(e=>{
-        const start = e.start.substr(11,5);
-        const end   = e.end.substr(11,5);
+  if(dayEvents.length === 0){
+    html += "この日は予約枠がありません";
+  }
 
-        if(e.title==="空き"){
-          html += `<div class="slot free" onclick="reserve('${e.start}','${e.end}')">
-                    ${start} - ${end}
-                  </div>`;
-        } else {
-          html += `<div class="slot full">
-                    ${start} - ${end}（予約済）
-                  </div>`;
+  dayEvents.forEach(e => {
+    const start = e.start.substr(11,5);
+    const end = e.end.substr(11,5);
+
+    if(e.title === "空き"){
+      html += `<div class="slot free" onclick="openModal('${e.start}','${e.end}')">
+        ○ ${start} - ${end}
+      </div>`;
+    } else {
+      html += `<div class="slot full">
+        × ${start} - ${end}（予約済）
+      </div>`;
+    }
+  });
+
+  document.getElementById("daySlots").innerHTML = html;
+}
+
+function openModal(start, end){
+  selectedSlot = {start, end};
+  document.getElementById("modalBg").style.display = "flex";
+}
+function closeModal(){
+  document.getElementById("modalBg").style.display = "none";
+}
+
+function submitReservation(){
+  const name = studentName.value.trim();
+  const email = studentEmail.value.trim();
+  const memo = studentMemo.value.trim();
+
+  if(!name || !email){
+    alert("名前とメールは必須です");
+    return;
+  }
+
+  fetch(GAS_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      start: selectedSlot.start,
+      end: selectedSlot.end,
+      name,
+      email,
+      memo
+    })
+  })
+  .then(r => r.text())
+  .then(r => {
+    if(r === "OK"){
+      alert("予約完了しました");
+
+      allEvents.forEach(e => {
+        if(e.start === selectedSlot.start && e.end === selectedSlot.end){
+          e.title = "予約済";
         }
       });
 
-      document.getElementById("daySlots").innerHTML = html;
-    });
-}
-
-// 予約
-function reserve(start,end){
-  const name = prompt("お名前を入力してください");
-  const email = prompt("メールアドレスを入力してください");
-
-  if(!name || !email) return;
-
-  fetch(GAS_URL,{
-    method:"POST",
-    body:JSON.stringify({ start,end,name,email })
-  })
-  .then(r=>r.text())
-  .then(r=>{
-    if(r==="OK"){
-      alert("予約完了しました");
-      loadDay(start.substr(0,10));
-      location.reload(); // ← 青い日付を更新
+      loadDay(selectedSlot.start.substr(0,10));
+      closeModal();
+      studentName.value = "";
+      studentEmail.value = "";
+      studentMemo.value = "";
     } else {
       alert("すでに予約されています");
     }
   });
 }
 </script>
-
 
 </body>
 </html>

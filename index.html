@@ -173,10 +173,8 @@ document.addEventListener("DOMContentLoaded", () => {
 function loadDay(date){
   const now = new Date();
 
-  const dayEvents = allEvents.filter(e => {
-    if(!e.start.startsWith(date)) return false;
-    return new Date(e.start) > now;
-  });
+  // 当日の全イベントを取得（表示はGAS側で1時間前チェック）
+  const dayEvents = allEvents.filter(e => e.start.startsWith(date));
 
   let html = `<h3>${date} の予約可能時間</h3>`;
 
@@ -188,19 +186,29 @@ function loadDay(date){
     const start = e.start.substr(11,5);
     const end = e.end.substr(11,5);
 
-    if(e.title === "空き"){
-      html += `<div class="slot free" onclick="openModal('${e.start}','${e.end}')">
-        ○ ${start} - ${end}
-      </div>`;
+    let slotClass = "slot";
+    let label = "○";
+
+    const diff = new Date(e.start) - now; // 時間差（ミリ秒）
+
+    if(e.title === "予約済"){
+      slotClass += " full";
+      label = "×";
+    } else if(diff < 60*60*1000){ // 1時間未満
+      slotClass += " full"; // グレー表示
+      label = "×";
     } else {
-      html += `<div class="slot full">
-        × ${start} - ${end}（予約済）
-      </div>`;
+      slotClass += " free";
     }
+
+    html += `<div class="${slotClass}" onclick="${label==='○' ? `openModal('${e.start}','${e.end}')` : ''}">
+      ${label} ${start} - ${end} ${e.title==="予約済" ? "（予約済）" : ""}
+    </div>`;
   });
 
   document.getElementById("daySlots").innerHTML = html;
 }
+
 
 function openModal(start, end){
   selectedSlot = {start, end};
